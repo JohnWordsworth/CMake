@@ -189,6 +189,41 @@ void cmComputeTargetDepends::CollectTargetDepends(int depender_index)
   if (depender->GetType() == cmStateEnums::INTERFACE_LIBRARY) {
     return;
   }
+  
+  // Option to explicitly set target dependencies manually for static libraries
+  // as they don't always require previous libs to finish building.
+  const char *compileDepends = depender->GetProperty("COMPILE_DEPENDS");
+  if (compileDepends != nullptr) {
+    if (depender->GetType() != cmStateEnums::STATIC_LIBRARY) {
+      this->GlobalGenerator->GetCMakeInstance()->IssueMessage(
+        cmake::FATAL_ERROR,
+        "Only STATIC libraries may explicitly set COMPILE_DEPENDS.",
+        depender->GetBacktrace());
+      return;
+    }
+    
+    std::vector<std::string> dependsList;
+    cmSystemTools::ExpandListArgument(compileDepends, dependsList);
+    
+    std::set<std::string> emitted;
+    emitted.insert(depender->GetName());
+    
+    if (depender->GetType() == cmStateEnums::STATIC_LIBRARY) {
+      for (std::string const& it : dependsList) {
+        for (const cmGeneratorTarget* target : this->GetTargets()) {
+          if ( target->GetName() == it ) {
+            if (emitted.insert(it).second) {
+              const cmLinkItem linkItem(it, target);
+              this->AddTargetDepend(depender_index, linkItem, true);
+              this->AddInterfaceDepends(depender_index, linkItem, it, emitted);
+            }
+          }
+        }
+      }
+    }
+    
+    return;
+  }
 
   // Loop over all targets linked directly in all configs.
   // We need to make targets depend on the union of all config-specific
